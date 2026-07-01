@@ -115,7 +115,7 @@ const Inventory = () => {
             <form onSubmit={handleSubmit}>
               <div className="input-group">
                 <label>Product Image</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
                   {formData.image ? (
                     <img src={formData.image} alt="Preview" style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '8px' }} />
                   ) : (
@@ -132,7 +132,22 @@ const Inventory = () => {
                     }
                   }} style={{ flex: 1, fontSize: '0.85rem' }} />
                 </div>
+                <input
+                  className="input-field"
+                  type="url"
+                  placeholder="Or paste image link (https://...)"
+                  value={formData.image && formData.image.startsWith('http') ? formData.image : ''}
+                  onChange={e => setFormData({...formData, image: e.target.value})}
+                  style={{ fontSize: '0.85rem' }}
+                />
+                {formData.image && (
+                  <button type="button" onClick={() => setFormData({...formData, image: ''})}
+                    style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: 'var(--danger-color)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                    ✕ Remove Image
+                  </button>
+                )}
               </div>
+
               <div className="input-group">
                 <label>Item Name</label>
                 <input required className="input-field" type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="e.g. Wire 1.5mm" />
