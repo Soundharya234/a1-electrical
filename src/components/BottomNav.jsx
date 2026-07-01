@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Package, Receipt, Clock } from 'lucide-react';
+import { LayoutDashboard, Package, Receipt, Clock, Users } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 
 const BottomNav = () => {
@@ -40,6 +40,10 @@ const BottomNav = () => {
       <NavLink to="/history" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
         <Clock size={24} />
         <span>History</span>
+      </NavLink>
+      <NavLink to="/customers" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+        <Users size={24} />
+        <span>Customers</span>
       </NavLink>
     </nav>
   );

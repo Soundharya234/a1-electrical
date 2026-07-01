@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import Billing from './pages/Billing';
 import History from './pages/History';
+import Customers from './pages/Customers';
 import Login from './pages/Login';
 
 function App() {
@@ -33,6 +34,7 @@ function App() {
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/billing" element={<Billing />} />
           <Route path="/history" element={<History />} />
+          <Route path="/customers" element={<Customers />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

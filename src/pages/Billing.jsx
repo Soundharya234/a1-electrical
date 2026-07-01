@@ -3,10 +3,12 @@ import { useStore } from '../context/StoreContext';
 import { ShoppingCart, Plus, Minus, Trash2, CheckCircle, Printer } from 'lucide-react';
 
 const Billing = () => {
-  const { items, createBill } = useStore();
+  const { items, createBill, customers, addCustomer } = useStore();
   const [cart, setCart] = useState([]);
   const [selectedItemId, setSelectedItemId] = useState('');
   const [customerName, setCustomerName] = useState('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [successMsg, setSuccessMsg] = useState(false);
   const [lastBill, setLastBill] = useState(null);
 
@@ -48,15 +50,36 @@ const Billing = () => {
 
   const handleCheckout = () => {
     if (cart.length === 0) return;
-    
+
+    let finalCustomerName = 'Walk-in Customer';
+    let finalCustomerId = null;
+
+    if (selectedCustomerId) {
+      const cust = customers.find(c => c.id === selectedCustomerId);
+      if (cust) {
+        finalCustomerName = cust.name;
+        finalCustomerId = cust.id;
+      }
+    } else if (isNewCustomer && customerName.trim()) {
+      // Save as new customer
+      const newCust = addCustomer({ name: customerName.trim(), phone: '', address: '' });
+      finalCustomerName = newCust.name;
+      finalCustomerId = newCust.id;
+    } else if (customerName.trim()) {
+      finalCustomerName = customerName.trim();
+    }
+
     const newBill = createBill({
-      customerName: customerName || 'Walk-in Customer',
+      customerName: finalCustomerName,
+      customerId: finalCustomerId,
       total: totalAmount
     }, cart);
 
     setLastBill(newBill);
     setCart([]);
     setCustomerName('');
+    setSelectedCustomerId('');
+    setIsNewCustomer(false);
     setSuccessMsg(true);
     setTimeout(() => setSuccessMsg(false), 5000);
   };
@@ -135,15 +158,35 @@ const Billing = () => {
             </div>
 
             <div className="input-group">
-              <label>Customer Name (Optional)</label>
-              <input 
-                className="input-field" 
-                type="text" 
-                placeholder="Walk-in Customer"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-              />
+              <label>Customer</label>
+              <select
+                className="input-field"
+                value={selectedCustomerId}
+                onChange={e => {
+                  setSelectedCustomerId(e.target.value);
+                  setIsNewCustomer(e.target.value === '__new__');
+                  if (e.target.value !== '__new__') setCustomerName('');
+                }}
+              >
+                <option value="">Walk-in Customer</option>
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} – {c.phone}</option>
+                ))}
+                <option value="__new__">➕ Add New Customer</option>
+              </select>
             </div>
+            {isNewCustomer && (
+              <div className="input-group">
+                <label>New Customer Name *</label>
+                <input
+                  className="input-field"
+                  type="text"
+                  placeholder="Enter customer name"
+                  value={customerName}
+                  onChange={e => setCustomerName(e.target.value)}
+                />
+              </div>
+            )}
 
             <button 
               className="btn btn-primary" 

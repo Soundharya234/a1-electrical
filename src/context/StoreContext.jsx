@@ -32,6 +32,7 @@ export const StoreProvider = ({ children }) => {
   const [items, setItems] = useState(() => loadState('a1_inventory', defaultItems));
   const [bills, setBills] = useState(() => loadState('a1_invoices', []));
   const [authConfig, setAuthConfig] = useState(() => loadState('a1_auth_config', { username: 'thiru', password: 'admin' }));
+  const [customers, setCustomers] = useState(() => loadState('a1_customers', []));
 
   // Save to local storage whenever state changes
   useEffect(() => {
@@ -45,6 +46,10 @@ export const StoreProvider = ({ children }) => {
   useEffect(() => {
     localStorage.setItem('a1_auth_config', JSON.stringify(authConfig));
   }, [authConfig]);
+
+  useEffect(() => {
+    localStorage.setItem('a1_customers', JSON.stringify(customers));
+  }, [customers]);
 
   // Actions
   const addItem = (itemData) => {
@@ -87,6 +92,20 @@ export const StoreProvider = ({ children }) => {
 
   const updateAuth = (username, password) => {
     setAuthConfig({ username, password });
+  };
+
+  const addCustomer = (customerData) => {
+    const newCustomer = { ...customerData, id: uuidv4(), createdAt: new Date().toISOString() };
+    setCustomers(prev => [...prev, newCustomer]);
+    return newCustomer;
+  };
+
+  const updateCustomer = (id, updatedData) => {
+    setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updatedData } : c));
+  };
+
+  const deleteCustomer = (id) => {
+    setCustomers(prev => prev.filter(c => c.id !== id));
   };
 
   const deleteBill = (id, shouldRestock = true) => {
@@ -159,6 +178,7 @@ export const StoreProvider = ({ children }) => {
     items,
     bills,
     authConfig,
+    customers,
     addItem,
     updateItem,
     deleteItem,
@@ -166,7 +186,10 @@ export const StoreProvider = ({ children }) => {
     deleteBill,
     returnItemsFromBill,
     getLowStockItems,
-    updateAuth
+    updateAuth,
+    addCustomer,
+    updateCustomer,
+    deleteCustomer
   };
 
   return (
