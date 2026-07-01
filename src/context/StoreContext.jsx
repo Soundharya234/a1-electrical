@@ -50,62 +50,66 @@ export const StoreProvider = ({ children }) => {
       });
 
       // 2. Migration logic: If Firestore is empty, migrate local data
-      const itemsSnapshot = await getDocs(collection(db, 'items'));
-      if (itemsSnapshot.empty) {
-        console.log("Firestore empty, running migration...");
-        const localItems = loadLocalState('a1_inventory');
-        const localBills = loadLocalState('a1_invoices');
-        const localCustomers = loadLocalState('a1_customers');
-        const localAuth = loadLocalState('a1_auth_config');
+      try {
+        const itemsSnapshot = await getDocs(collection(db, 'items'));
+        if (itemsSnapshot.empty) {
+          console.log("Firestore empty, running migration...");
+          const localItems = loadLocalState('a1_inventory');
+          const localBills = loadLocalState('a1_invoices');
+          const localCustomers = loadLocalState('a1_customers');
+          const localAuth = loadLocalState('a1_auth_config');
 
-        if (localItems && localItems.length > 0) {
-          const batch = writeBatch(db);
-          
-          localItems.forEach(item => {
-            batch.set(doc(collection(db, 'items'), item.id), item);
-          });
-
-          if (localBills) {
-            localBills.forEach(bill => {
-              batch.set(doc(collection(db, 'bills'), bill.id), bill);
+          if (localItems && localItems.length > 0) {
+            const batch = writeBatch(db);
+            
+            localItems.forEach(item => {
+              batch.set(doc(collection(db, 'items'), item.id), item);
             });
-          }
 
-          if (localCustomers) {
-            localCustomers.forEach(customer => {
-              batch.set(doc(collection(db, 'customers'), customer.id), customer);
-            });
-          }
+            if (localBills) {
+              localBills.forEach(bill => {
+                batch.set(doc(collection(db, 'bills'), bill.id), bill);
+              });
+            }
 
-          if (localAuth) {
-            batch.set(doc(db, 'settings', 'authConfig'), localAuth);
+            if (localCustomers) {
+              localCustomers.forEach(customer => {
+                batch.set(doc(collection(db, 'customers'), customer.id), customer);
+              });
+            }
+
+            if (localAuth) {
+              batch.set(doc(db, 'settings', 'authConfig'), localAuth);
+            } else {
+              batch.set(doc(db, 'settings', 'authConfig'), { username: 'thiru', password: 'admin' });
+            }
+
+            await batch.commit();
+            console.log("Migration complete!");
           } else {
+             // No local data, initialize with default items
+             const defaultItems = [
+              { id: uuidv4(), name: 'Finolex 1.5 sq mm Wire Coil', price: 1200, stockQuantity: 20, alertThreshold: 5 },
+              { id: uuidv4(), name: 'Anchor Roma Switch 6A', price: 45, stockQuantity: 100, alertThreshold: 20 },
+              { id: uuidv4(), name: 'Crompton Ceiling Fan 1200mm', price: 1850, stockQuantity: 15, alertThreshold: 3 },
+              { id: uuidv4(), name: 'Havells MCB 32A Double Pole', price: 450, stockQuantity: 30, alertThreshold: 10 },
+              { id: uuidv4(), name: 'Philips LED Bulb 9W', price: 110, stockQuantity: 50, alertThreshold: 15 },
+              { id: uuidv4(), name: 'PVC Conduit Pipe 1 inch', price: 65, stockQuantity: 200, alertThreshold: 50 },
+              { id: uuidv4(), name: 'Anchor Insulation Tape', price: 15, stockQuantity: 150, alertThreshold: 20 },
+            ];
+            const batch = writeBatch(db);
+            defaultItems.forEach(item => {
+              batch.set(doc(collection(db, 'items'), item.id), item);
+            });
             batch.set(doc(db, 'settings', 'authConfig'), { username: 'thiru', password: 'admin' });
+            await batch.commit();
           }
-
-          await batch.commit();
-          console.log("Migration complete!");
-        } else {
-           // No local data, initialize with default items
-           const defaultItems = [
-            { id: uuidv4(), name: 'Finolex 1.5 sq mm Wire Coil', price: 1200, stockQuantity: 20, alertThreshold: 5 },
-            { id: uuidv4(), name: 'Anchor Roma Switch 6A', price: 45, stockQuantity: 100, alertThreshold: 20 },
-            { id: uuidv4(), name: 'Crompton Ceiling Fan 1200mm', price: 1850, stockQuantity: 15, alertThreshold: 3 },
-            { id: uuidv4(), name: 'Havells MCB 32A Double Pole', price: 450, stockQuantity: 30, alertThreshold: 10 },
-            { id: uuidv4(), name: 'Philips LED Bulb 9W', price: 110, stockQuantity: 50, alertThreshold: 15 },
-            { id: uuidv4(), name: 'PVC Conduit Pipe 1 inch', price: 65, stockQuantity: 200, alertThreshold: 50 },
-            { id: uuidv4(), name: 'Anchor Insulation Tape', price: 15, stockQuantity: 150, alertThreshold: 20 },
-          ];
-          const batch = writeBatch(db);
-          defaultItems.forEach(item => {
-            batch.set(doc(collection(db, 'items'), item.id), item);
-          });
-          batch.set(doc(db, 'settings', 'authConfig'), { username: 'thiru', password: 'admin' });
-          await batch.commit();
         }
+      } catch (error) {
+        console.error("Firebase migration error:", error);
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     };
 
     setupListeners();
