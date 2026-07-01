@@ -5,76 +5,108 @@ const StoreContext = createContext();
 
 export const useStore = () => useContext(StoreContext);
 
+// Use relative URL so Vite proxy handles it locally, and Render handles it in production
+// If deployed separately, set this to the backend URL (e.g. 'https://backend.onrender.com')
+// But for now, let's assume we run them together or set a fallback.
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 export const StoreProvider = ({ children }) => {
-  // Try to load from local storage
-  const loadState = (key, defaultValue) => {
-    const saved = localStorage.getItem(key);
-    if (saved) {
+  const [items, setItems] = useState([]);
+  const [bills, setBills] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [authConfig, setAuthConfig] = useState({ username: 'thiru', password: 'admin' });
+  const [loading, setLoading] = useState(true);
+
+  // Initial fetch
+  useEffect(() => {
+    const fetchData = async () => {
       try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return defaultValue;
+        const [itemsRes, billsRes, customersRes, authRes] = await Promise.all([
+          fetch(`${API_URL}/api/items`).catch(() => null),
+          fetch(`${API_URL}/api/bills`).catch(() => null),
+          fetch(`${API_URL}/api/customers`).catch(() => null),
+          fetch(`${API_URL}/api/settings`).catch(() => null)
+        ]);
+
+        if (itemsRes && itemsRes.ok) setItems(await itemsRes.json());
+        else throw new Error("Backend not available");
+        
+        if (billsRes && billsRes.ok) setBills(await billsRes.json());
+        if (customersRes && customersRes.ok) setCustomers(await customersRes.json());
+        if (authRes && authRes.ok) setAuthConfig(await authRes.json());
+
+      } catch (error) {
+        console.warn("Backend unavailable, falling back to local storage...", error);
+        const load = (key, def) => {
+          const val = localStorage.getItem(key);
+          return val ? JSON.parse(val) : def;
+        };
+        setItems(load('a1_inventory', []));
+        setBills(load('a1_invoices', []));
+        setCustomers(load('a1_customers', []));
+        setAuthConfig(load('a1_auth_config', { username: 'thiru', password: 'admin' }));
+      } finally {
+        setLoading(false);
       }
-    }
-    return defaultValue;
-  };
+    };
 
-  const defaultItems = [
-    { id: uuidv4(), name: 'Finolex 1.5 sq mm Wire Coil', price: 1200, stockQuantity: 20, alertThreshold: 5 },
-    { id: uuidv4(), name: 'Anchor Roma Switch 6A', price: 45, stockQuantity: 100, alertThreshold: 20 },
-    { id: uuidv4(), name: 'Crompton Ceiling Fan 1200mm', price: 1850, stockQuantity: 15, alertThreshold: 3 },
-    { id: uuidv4(), name: 'Havells MCB 32A Double Pole', price: 450, stockQuantity: 30, alertThreshold: 10 },
-    { id: uuidv4(), name: 'Philips LED Bulb 9W', price: 110, stockQuantity: 50, alertThreshold: 15 },
-    { id: uuidv4(), name: 'PVC Conduit Pipe 1 inch', price: 65, stockQuantity: 200, alertThreshold: 50 },
-    { id: uuidv4(), name: 'Anchor Insulation Tape', price: 15, stockQuantity: 150, alertThreshold: 20 },
-  ];
-
-  const [items, setItems] = useState(() => loadState('a1_inventory', defaultItems));
-  const [bills, setBills] = useState(() => loadState('a1_invoices', []));
-  const [authConfig, setAuthConfig] = useState(() => loadState('a1_auth_config', { username: 'thiru', password: 'admin' }));
-  const [customers, setCustomers] = useState(() => loadState('a1_customers', []));
-
-  // Save to local storage whenever state changes
-  useEffect(() => {
-    localStorage.setItem('a1_inventory', JSON.stringify(items));
-  }, [items]);
-
-  useEffect(() => {
-    localStorage.setItem('a1_invoices', JSON.stringify(bills));
-  }, [bills]);
-
-  useEffect(() => {
-    localStorage.setItem('a1_auth_config', JSON.stringify(authConfig));
-  }, [authConfig]);
-
-  useEffect(() => {
-    localStorage.setItem('a1_customers', JSON.stringify(customers));
-  }, [customers]);
+    fetchData();
+  }, []);
 
   // Actions
-  const addItem = (itemData) => {
-    setItems(prev => [...prev, { ...itemData, id: uuidv4() }]);
+  const addItem = async (itemData) => {
+    const id = uuidv4();
+    const newItem = { ...itemData, id };
+    
+    // Optimistic update
+    setItems(prev => [...prev, newItem]);
+    
+    try {
+      await fetch(`${API_URL}/api/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newItem)
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const updateItem = (id, updatedData) => {
+  const updateItem = async (id, updatedData) => {
+    // Optimistic update
     setItems(prev => prev.map(item => item.id === id ? { ...item, ...updatedData } : item));
+    
+    try {
+      await fetch(`${API_URL}/api/items/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedData)
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const deleteItem = (id) => {
+  const deleteItem = async (id) => {
     setItems(prev => prev.filter(item => item.id !== id));
+    try {
+      await fetch(`${API_URL}/api/items/${id}`, { method: 'DELETE' });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const createBill = (billData, cartItems) => {
+  const createBill = async (billData, cartItems) => {
+    const id = uuidv4();
     const newBill = {
       ...billData,
-      id: uuidv4(),
+      id,
       date: new Date().toISOString(),
       items: cartItems
     };
     
+    // Optimistic update
     setBills(prev => [newBill, ...prev]);
-
-    // Deduct stock
     setItems(prev => prev.map(item => {
       const cartItem = cartItems.find(ci => ci.itemId === item.id);
       if (cartItem) {
@@ -82,6 +114,16 @@ export const StoreProvider = ({ children }) => {
       }
       return item;
     }));
+
+    try {
+      await fetch(`${API_URL}/api/bills`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newBill)
+      });
+    } catch (e) {
+      console.error(e);
+    }
     
     return newBill;
   };
@@ -90,88 +132,132 @@ export const StoreProvider = ({ children }) => {
     return items.filter(item => item.stockQuantity <= item.alertThreshold);
   };
 
-  const updateAuth = (username, password) => {
+  const updateAuth = async (username, password) => {
     setAuthConfig({ username, password });
+    try {
+      await fetch(`${API_URL}/api/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const addCustomer = (customerData) => {
-    const newCustomer = { ...customerData, id: uuidv4(), createdAt: new Date().toISOString() };
+  const addCustomer = async (customerData) => {
+    const id = uuidv4();
+    const newCustomer = { ...customerData, id, createdAt: new Date().toISOString() };
+    
     setCustomers(prev => [...prev, newCustomer]);
+    
+    try {
+      await fetch(`${API_URL}/api/customers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCustomer)
+      });
+    } catch (e) {
+      console.error(e);
+    }
     return newCustomer;
   };
 
-  const updateCustomer = (id, updatedData) => {
+  const updateCustomer = async (id, updatedData) => {
     setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updatedData } : c));
+    
+    try {
+      await fetch(`${API_URL}/api/customers/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedData)
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const deleteCustomer = (id) => {
+  const deleteCustomer = async (id) => {
     setCustomers(prev => prev.filter(c => c.id !== id));
+    try {
+      await fetch(`${API_URL}/api/customers/${id}`, { method: 'DELETE' });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const deleteBill = (id, shouldRestock = true) => {
-    setBills(prev => {
-      const billToDelete = prev.find(b => b.id === id);
-      if (!billToDelete) return prev;
-      
-      if (shouldRestock) {
-        // Restore stock
-        setItems(currentItems => {
-          return currentItems.map(item => {
-            const cartItem = billToDelete.items.find(ci => ci.itemId === item.id);
-            if (cartItem) {
-              return { ...item, stockQuantity: item.stockQuantity + cartItem.quantity };
-            }
-            return item;
-          });
-        });
-      }
-
-      return prev.filter(b => b.id !== id);
-    });
-  };
-
-  const returnItemsFromBill = (billId, returnedItemsMap) => {
-    setBills(prev => {
-      const billIndex = prev.findIndex(b => b.id === billId);
-      if (billIndex === -1) return prev;
-
-      const bill = { ...prev[billIndex] };
-      const updatedItems = [];
-      let newTotal = 0;
-
-      // Restore stock for returned items
+  const deleteBill = async (id, shouldRestock = true) => {
+    const billToDelete = bills.find(b => b.id === id);
+    if (!billToDelete) return;
+    
+    // Optimistic
+    setBills(prev => prev.filter(b => b.id !== id));
+    if (shouldRestock) {
       setItems(currentItems => {
-        return currentItems.map(invItem => {
-          if (returnedItemsMap[invItem.id]) {
-            return { ...invItem, stockQuantity: invItem.stockQuantity + returnedItemsMap[invItem.id] };
+        return currentItems.map(item => {
+          const cartItem = billToDelete.items.find(ci => ci.itemId === item.id);
+          if (cartItem) {
+            return { ...item, stockQuantity: item.stockQuantity + cartItem.quantity };
           }
-          return invItem;
+          return item;
         });
       });
+    }
 
-      // Update bill items and total
-      bill.items.forEach(cartItem => {
-        const returnQty = returnedItemsMap[cartItem.itemId] || 0;
-        const remainingQty = cartItem.quantity - returnQty;
-        
-        if (remainingQty > 0) {
-          updatedItems.push({ ...cartItem, quantity: remainingQty });
-          newTotal += remainingQty * cartItem.price;
+    try {
+      await fetch(`${API_URL}/api/bills/${id}?restock=${shouldRestock}`, { method: 'DELETE' });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const returnItemsFromBill = async (billId, returnedItemsMap) => {
+    const billIndex = bills.findIndex(b => b.id === billId);
+    if (billIndex === -1) return;
+
+    // We rely on backend response to update state to avoid complex optimistic logic for returns, 
+    // or we can implement optimistic logic
+    const bill = { ...bills[billIndex] };
+    const updatedItems = [];
+    let newTotal = 0;
+
+    setItems(currentItems => {
+      return currentItems.map(invItem => {
+        if (returnedItemsMap[invItem.id]) {
+          return { ...invItem, stockQuantity: invItem.stockQuantity + returnedItemsMap[invItem.id] };
         }
+        return invItem;
       });
+    });
 
-      if (updatedItems.length === 0) {
-        // All items returned, delete bill
-        return prev.filter(b => b.id !== billId);
+    bill.items.forEach(cartItem => {
+      const returnQty = returnedItemsMap[cartItem.itemId] || 0;
+      const remainingQty = cartItem.quantity - returnQty;
+      if (remainingQty > 0) {
+        updatedItems.push({ ...cartItem, quantity: remainingQty });
+        newTotal += remainingQty * cartItem.price;
       }
+    });
 
+    if (updatedItems.length === 0) {
+      setBills(prev => prev.filter(b => b.id !== billId));
+    } else {
       bill.items = updatedItems;
       bill.total = newTotal;
-
-      const newBills = [...prev];
+      const newBills = [...bills];
       newBills[billIndex] = bill;
-      return newBills;
-    });
+      setBills(newBills);
+    }
+
+    try {
+      await fetch(`${API_URL}/api/bills/${billId}/return`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(returnedItemsMap)
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const value = {
@@ -194,7 +280,11 @@ export const StoreProvider = ({ children }) => {
 
   return (
     <StoreContext.Provider value={value}>
-      {children}
+      {!loading ? children : (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--bg-color)', color: 'var(--primary-color)' }}>
+          <h2>Connecting to Cloud Database...</h2>
+        </div>
+      )}
     </StoreContext.Provider>
   );
 };
