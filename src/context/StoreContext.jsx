@@ -1,169 +1,87 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { db } from '../firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, getDocs, writeBatch } from 'firebase/firestore';
 
 const StoreContext = createContext();
 
 export const useStore = () => useContext(StoreContext);
 
 export const StoreProvider = ({ children }) => {
-  const [items, setItems] = useState([]);
-  const [bills, setBills] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [authConfig, setAuthConfig] = useState({ username: 'thiru', password: 'admin' });
-  const [loading, setLoading] = useState(true);
-
-  // Helper to load from local storage
-  const loadLocalState = (key) => {
+  // Try to load from local storage
+  const loadState = (key, defaultValue) => {
     const saved = localStorage.getItem(key);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return null; }
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return defaultValue;
+      }
     }
-    return null;
+    return defaultValue;
   };
+
+  const defaultItems = [
+    { id: uuidv4(), name: 'Finolex 1.5 sq mm Wire Coil', price: 1200, stockQuantity: 20, alertThreshold: 5 },
+    { id: uuidv4(), name: 'Anchor Roma Switch 6A', price: 45, stockQuantity: 100, alertThreshold: 20 },
+    { id: uuidv4(), name: 'Crompton Ceiling Fan 1200mm', price: 1850, stockQuantity: 15, alertThreshold: 3 },
+    { id: uuidv4(), name: 'Havells MCB 32A Double Pole', price: 450, stockQuantity: 30, alertThreshold: 10 },
+    { id: uuidv4(), name: 'Philips LED Bulb 9W', price: 110, stockQuantity: 50, alertThreshold: 15 },
+    { id: uuidv4(), name: 'PVC Conduit Pipe 1 inch', price: 65, stockQuantity: 200, alertThreshold: 50 },
+    { id: uuidv4(), name: 'Anchor Insulation Tape', price: 15, stockQuantity: 150, alertThreshold: 20 },
+  ];
+
+  const [items, setItems] = useState(() => loadState('a1_inventory', defaultItems));
+  const [bills, setBills] = useState(() => loadState('a1_invoices', []));
+  const [authConfig, setAuthConfig] = useState(() => loadState('a1_auth_config', { username: 'thiru', password: 'admin' }));
+  const [customers, setCustomers] = useState(() => loadState('a1_customers', []));
+
+  // Save to local storage whenever state changes
+  useEffect(() => {
+    localStorage.setItem('a1_inventory', JSON.stringify(items));
+  }, [items]);
 
   useEffect(() => {
-    let unsubscribeItems, unsubscribeBills, unsubscribeCustomers, unsubscribeAuth;
+    localStorage.setItem('a1_invoices', JSON.stringify(bills));
+  }, [bills]);
 
-    const setupListeners = async () => {
-      // 1. Setup real-time listeners
-      unsubscribeItems = onSnapshot(collection(db, 'items'), (snapshot) => {
-        setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
+  useEffect(() => {
+    localStorage.setItem('a1_auth_config', JSON.stringify(authConfig));
+  }, [authConfig]);
 
-      unsubscribeBills = onSnapshot(collection(db, 'bills'), (snapshot) => {
-        // Sort bills by date descending
-        const fetchedBills = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        fetchedBills.sort((a, b) => new Date(b.date) - new Date(a.date));
-        setBills(fetchedBills);
-      });
-
-      unsubscribeCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
-        setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
-
-      unsubscribeAuth = onSnapshot(doc(db, 'settings', 'authConfig'), (docSnap) => {
-        if (docSnap.exists()) {
-          setAuthConfig(docSnap.data());
-        }
-      });
-
-      // Fallback timeout in case Firestore hangs (e.g., database not created)
-      const timeoutId = setTimeout(() => {
-        console.warn("Firestore connection timed out. Loading anyway...");
-        setLoading(false);
-      }, 3000);
-
-      // 2. Migration logic: If Firestore is empty, migrate local data
-      try {
-        const itemsSnapshot = await getDocs(collection(db, 'items'));
-        if (itemsSnapshot.empty) {
-          console.log("Firestore empty, running migration...");
-          const localItems = loadLocalState('a1_inventory');
-          const localBills = loadLocalState('a1_invoices');
-          const localCustomers = loadLocalState('a1_customers');
-          const localAuth = loadLocalState('a1_auth_config');
-
-          if (localItems && localItems.length > 0) {
-            const batch = writeBatch(db);
-            
-            localItems.forEach(item => {
-              batch.set(doc(collection(db, 'items'), item.id), item);
-            });
-
-            if (localBills) {
-              localBills.forEach(bill => {
-                batch.set(doc(collection(db, 'bills'), bill.id), bill);
-              });
-            }
-
-            if (localCustomers) {
-              localCustomers.forEach(customer => {
-                batch.set(doc(collection(db, 'customers'), customer.id), customer);
-              });
-            }
-
-            if (localAuth) {
-              batch.set(doc(db, 'settings', 'authConfig'), localAuth);
-            } else {
-              batch.set(doc(db, 'settings', 'authConfig'), { username: 'thiru', password: 'admin' });
-            }
-
-            await batch.commit();
-            console.log("Migration complete!");
-          } else {
-             // No local data, initialize with default items
-             const defaultItems = [
-              { id: uuidv4(), name: 'Finolex 1.5 sq mm Wire Coil', price: 1200, stockQuantity: 20, alertThreshold: 5 },
-              { id: uuidv4(), name: 'Anchor Roma Switch 6A', price: 45, stockQuantity: 100, alertThreshold: 20 },
-              { id: uuidv4(), name: 'Crompton Ceiling Fan 1200mm', price: 1850, stockQuantity: 15, alertThreshold: 3 },
-              { id: uuidv4(), name: 'Havells MCB 32A Double Pole', price: 450, stockQuantity: 30, alertThreshold: 10 },
-              { id: uuidv4(), name: 'Philips LED Bulb 9W', price: 110, stockQuantity: 50, alertThreshold: 15 },
-              { id: uuidv4(), name: 'PVC Conduit Pipe 1 inch', price: 65, stockQuantity: 200, alertThreshold: 50 },
-              { id: uuidv4(), name: 'Anchor Insulation Tape', price: 15, stockQuantity: 150, alertThreshold: 20 },
-            ];
-            const batch = writeBatch(db);
-            defaultItems.forEach(item => {
-              batch.set(doc(collection(db, 'items'), item.id), item);
-            });
-            batch.set(doc(db, 'settings', 'authConfig'), { username: 'thiru', password: 'admin' });
-            await batch.commit();
-          }
-        }
-      } catch (error) {
-        console.error("Firebase migration error:", error);
-      } finally {
-        clearTimeout(timeoutId);
-        setLoading(false);
-      }
-    };
-
-    setupListeners();
-
-    return () => {
-      if (unsubscribeItems) unsubscribeItems();
-      if (unsubscribeBills) unsubscribeBills();
-      if (unsubscribeCustomers) unsubscribeCustomers();
-      if (unsubscribeAuth) unsubscribeAuth();
-    };
-  }, []);
+  useEffect(() => {
+    localStorage.setItem('a1_customers', JSON.stringify(customers));
+  }, [customers]);
 
   // Actions
-  const addItem = async (itemData) => {
-    const id = uuidv4();
-    await setDoc(doc(db, 'items', id), { ...itemData, id });
+  const addItem = (itemData) => {
+    setItems(prev => [...prev, { ...itemData, id: uuidv4() }]);
   };
 
-  const updateItem = async (id, updatedData) => {
-    await setDoc(doc(db, 'items', id), updatedData, { merge: true });
+  const updateItem = (id, updatedData) => {
+    setItems(prev => prev.map(item => item.id === id ? { ...item, ...updatedData } : item));
   };
 
-  const deleteItem = async (id) => {
-    await deleteDoc(doc(db, 'items', id));
+  const deleteItem = (id) => {
+    setItems(prev => prev.filter(item => item.id !== id));
   };
 
-  const createBill = async (billData, cartItems) => {
-    const id = uuidv4();
+  const createBill = (billData, cartItems) => {
     const newBill = {
       ...billData,
-      id,
+      id: uuidv4(),
       date: new Date().toISOString(),
       items: cartItems
     };
     
-    // Create bill
-    await setDoc(doc(db, 'bills', id), newBill);
+    setBills(prev => [newBill, ...prev]);
 
     // Deduct stock
-    const batch = writeBatch(db);
-    cartItems.forEach(cartItem => {
-      const item = items.find(i => i.id === cartItem.itemId);
-      if (item) {
-        batch.set(doc(db, 'items', item.id), { stockQuantity: Math.max(0, item.stockQuantity - cartItem.quantity) }, { merge: true });
+    setItems(prev => prev.map(item => {
+      const cartItem = cartItems.find(ci => ci.itemId === item.id);
+      if (cartItem) {
+        return { ...item, stockQuantity: Math.max(0, item.stockQuantity - cartItem.quantity) };
       }
-    });
-    await batch.commit();
+      return item;
+    }));
     
     return newBill;
   };
@@ -172,76 +90,88 @@ export const StoreProvider = ({ children }) => {
     return items.filter(item => item.stockQuantity <= item.alertThreshold);
   };
 
-  const updateAuth = async (username, password) => {
-    await setDoc(doc(db, 'settings', 'authConfig'), { username, password });
+  const updateAuth = (username, password) => {
+    setAuthConfig({ username, password });
   };
 
-  const addCustomer = async (customerData) => {
-    const id = uuidv4();
-    const newCustomer = { ...customerData, id, createdAt: new Date().toISOString() };
-    await setDoc(doc(db, 'customers', id), newCustomer);
+  const addCustomer = (customerData) => {
+    const newCustomer = { ...customerData, id: uuidv4(), createdAt: new Date().toISOString() };
+    setCustomers(prev => [...prev, newCustomer]);
     return newCustomer;
   };
 
-  const updateCustomer = async (id, updatedData) => {
-    await setDoc(doc(db, 'customers', id), updatedData, { merge: true });
+  const updateCustomer = (id, updatedData) => {
+    setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updatedData } : c));
   };
 
-  const deleteCustomer = async (id) => {
-    await deleteDoc(doc(db, 'customers', id));
+  const deleteCustomer = (id) => {
+    setCustomers(prev => prev.filter(c => c.id !== id));
   };
 
-  const deleteBill = async (id, shouldRestock = true) => {
-    const billToDelete = bills.find(b => b.id === id);
-    if (!billToDelete) return;
-    
-    if (shouldRestock) {
-      const batch = writeBatch(db);
-      billToDelete.items.forEach(cartItem => {
-        const item = items.find(i => i.id === cartItem.itemId);
-        if (item) {
-          batch.set(doc(db, 'items', item.id), { stockQuantity: item.stockQuantity + cartItem.quantity }, { merge: true });
+  const deleteBill = (id, shouldRestock = true) => {
+    setBills(prev => {
+      const billToDelete = prev.find(b => b.id === id);
+      if (!billToDelete) return prev;
+      
+      if (shouldRestock) {
+        // Restore stock
+        setItems(currentItems => {
+          return currentItems.map(item => {
+            const cartItem = billToDelete.items.find(ci => ci.itemId === item.id);
+            if (cartItem) {
+              return { ...item, stockQuantity: item.stockQuantity + cartItem.quantity };
+            }
+            return item;
+          });
+        });
+      }
+
+      return prev.filter(b => b.id !== id);
+    });
+  };
+
+  const returnItemsFromBill = (billId, returnedItemsMap) => {
+    setBills(prev => {
+      const billIndex = prev.findIndex(b => b.id === billId);
+      if (billIndex === -1) return prev;
+
+      const bill = { ...prev[billIndex] };
+      const updatedItems = [];
+      let newTotal = 0;
+
+      // Restore stock for returned items
+      setItems(currentItems => {
+        return currentItems.map(invItem => {
+          if (returnedItemsMap[invItem.id]) {
+            return { ...invItem, stockQuantity: invItem.stockQuantity + returnedItemsMap[invItem.id] };
+          }
+          return invItem;
+        });
+      });
+
+      // Update bill items and total
+      bill.items.forEach(cartItem => {
+        const returnQty = returnedItemsMap[cartItem.itemId] || 0;
+        const remainingQty = cartItem.quantity - returnQty;
+        
+        if (remainingQty > 0) {
+          updatedItems.push({ ...cartItem, quantity: remainingQty });
+          newTotal += remainingQty * cartItem.price;
         }
       });
-      await batch.commit();
-    }
 
-    await deleteDoc(doc(db, 'bills', id));
-  };
-
-  const returnItemsFromBill = async (billId, returnedItemsMap) => {
-    const bill = bills.find(b => b.id === billId);
-    if (!bill) return;
-
-    const updatedItems = [];
-    let newTotal = 0;
-    const batch = writeBatch(db);
-
-    // Restore stock for returned items
-    bill.items.forEach(cartItem => {
-      const returnQty = returnedItemsMap[cartItem.itemId] || 0;
-      const remainingQty = cartItem.quantity - returnQty;
-      
-      if (returnQty > 0) {
-        const invItem = items.find(i => i.id === cartItem.itemId);
-        if (invItem) {
-          batch.set(doc(db, 'items', invItem.id), { stockQuantity: invItem.stockQuantity + returnQty }, { merge: true });
-        }
+      if (updatedItems.length === 0) {
+        // All items returned, delete bill
+        return prev.filter(b => b.id !== billId);
       }
 
-      if (remainingQty > 0) {
-        updatedItems.push({ ...cartItem, quantity: remainingQty });
-        newTotal += remainingQty * cartItem.price;
-      }
+      bill.items = updatedItems;
+      bill.total = newTotal;
+
+      const newBills = [...prev];
+      newBills[billIndex] = bill;
+      return newBills;
     });
-
-    if (updatedItems.length === 0) {
-      await deleteDoc(doc(db, 'bills', billId));
-    } else {
-      batch.set(doc(db, 'bills', billId), { items: updatedItems, total: newTotal }, { merge: true });
-    }
-    
-    await batch.commit();
   };
 
   const value = {
@@ -264,11 +194,7 @@ export const StoreProvider = ({ children }) => {
 
   return (
     <StoreContext.Provider value={value}>
-      {!loading ? children : (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--bg-color)', color: 'var(--primary-color)' }}>
-          <h2>Loading A1 Electrical...</h2>
-        </div>
-      )}
+      {children}
     </StoreContext.Provider>
   );
 };
