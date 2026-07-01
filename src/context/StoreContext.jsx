@@ -49,6 +49,12 @@ export const StoreProvider = ({ children }) => {
         }
       });
 
+      // Fallback timeout in case Firestore hangs (e.g., database not created)
+      const timeoutId = setTimeout(() => {
+        console.warn("Firestore connection timed out. Loading anyway...");
+        setLoading(false);
+      }, 3000);
+
       // 2. Migration logic: If Firestore is empty, migrate local data
       try {
         const itemsSnapshot = await getDocs(collection(db, 'items'));
@@ -108,6 +114,7 @@ export const StoreProvider = ({ children }) => {
       } catch (error) {
         console.error("Firebase migration error:", error);
       } finally {
+        clearTimeout(timeoutId);
         setLoading(false);
       }
     };
