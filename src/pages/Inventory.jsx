@@ -136,7 +136,7 @@ const Inventory = () => {
                   className="input-field"
                   type="url"
                   placeholder="Or paste image link (https://...)"
-                  value={formData.image && formData.image.startsWith('http') ? formData.image : ''}
+                  value={typeof formData.image === 'string' && formData.image.startsWith('http') ? formData.image : ''}
                   onChange={e => setFormData({...formData, image: e.target.value})}
                   style={{ fontSize: '0.85rem' }}
                 />
