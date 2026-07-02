@@ -48,7 +48,7 @@ const Billing = () => {
 
   const totalAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (cart.length === 0) return;
 
     let finalCustomerName = 'Walk-in Customer';
@@ -62,14 +62,14 @@ const Billing = () => {
       }
     } else if (isNewCustomer && customerName.trim()) {
       // Save as new customer
-      const newCust = addCustomer({ name: customerName.trim(), phone: '', address: '' });
+      const newCust = await addCustomer({ name: customerName.trim(), phone: '', address: '' });
       finalCustomerName = newCust.name;
       finalCustomerId = newCust.id;
     } else if (customerName.trim()) {
       finalCustomerName = customerName.trim();
     }
 
-    const newBill = createBill({
+    const newBill = await createBill({
       customerName: finalCustomerName,
       customerId: finalCustomerId,
       total: totalAmount
