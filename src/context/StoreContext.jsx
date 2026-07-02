@@ -28,12 +28,47 @@ export const StoreProvider = ({ children }) => {
           fetch(`${API_URL}/api/settings`).catch(() => null)
         ]);
 
-        if (itemsRes && itemsRes.ok) setItems(await itemsRes.json());
-        else throw new Error("Backend not available");
+        if (!itemsRes || !itemsRes.ok) throw new Error("Backend not available");
         
-        if (billsRes && billsRes.ok) setBills(await billsRes.json());
-        if (customersRes && customersRes.ok) setCustomers(await customersRes.json());
-        if (authRes && authRes.ok) setAuthConfig(await authRes.json());
+        let fetchedItems = await itemsRes.json();
+        const fetchedBills = billsRes.ok ? await billsRes.json() : [];
+        const fetchedCustomers = customersRes.ok ? await customersRes.json() : [];
+        const fetchedAuth = authRes.ok ? await authRes.json() : { username: 'thiru', password: 'admin' };
+
+        // Auto-migration from localStorage to MongoDB if MongoDB is empty
+        const load = (key, def) => {
+          const val = localStorage.getItem(key);
+          return val ? JSON.parse(val) : def;
+        };
+        const localItems = load('a1_inventory', []);
+        
+        if (fetchedItems.length === 0 && localItems.length > 0) {
+          console.log("Migrating local data to MongoDB...");
+          for (let item of localItems) {
+            await fetch(`${API_URL}/api/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) }).catch(() => null);
+          }
+          const localBills = load('a1_invoices', []);
+          for (let bill of localBills) {
+            await fetch(`${API_URL}/api/bills`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bill) }).catch(() => null);
+          }
+          const localCustomers = load('a1_customers', []);
+          for (let customer of localCustomers) {
+            await fetch(`${API_URL}/api/customers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(customer) }).catch(() => null);
+          }
+          // Fetch again after migration
+          const newItemsRes = await fetch(`${API_URL}/api/items`);
+          fetchedItems = await newItemsRes.json();
+        } else if (fetchedItems.length === 0) {
+          // If both are empty, load defaults via backend
+          await fetch(`${API_URL}/api/setup`, { method: 'POST' }).catch(() => null);
+          const newItemsRes = await fetch(`${API_URL}/api/items`);
+          fetchedItems = await newItemsRes.json();
+        }
+
+        setItems(fetchedItems);
+        setBills(fetchedBills);
+        setCustomers(fetchedCustomers);
+        setAuthConfig(fetchedAuth);
 
       } catch (error) {
         console.warn("Backend unavailable, falling back to local storage...", error);
