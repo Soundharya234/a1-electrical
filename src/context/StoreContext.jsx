@@ -88,6 +88,23 @@ export const StoreProvider = ({ children }) => {
     fetchData();
   }, []);
 
+  // Sync to local storage on any change (Offline-First backup)
+  useEffect(() => {
+    if (!loading) localStorage.setItem('a1_inventory', JSON.stringify(items));
+  }, [items, loading]);
+
+  useEffect(() => {
+    if (!loading) localStorage.setItem('a1_invoices', JSON.stringify(bills));
+  }, [bills, loading]);
+
+  useEffect(() => {
+    if (!loading) localStorage.setItem('a1_customers', JSON.stringify(customers));
+  }, [customers, loading]);
+
+  useEffect(() => {
+    if (!loading) localStorage.setItem('a1_auth_config', JSON.stringify(authConfig));
+  }, [authConfig, loading]);
+
   // Actions
   const addItem = async (itemData) => {
     const id = uuidv4();
