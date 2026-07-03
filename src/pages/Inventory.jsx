@@ -16,40 +16,48 @@ const Inventory = () => {
   });
 
   const openModal = (item = null) => {
-    if (item) {
-      setFormData({
-        name: item.name,
-        price: item.price,
-        stockQuantity: item.stockQuantity,
-        alertThreshold: item.alertThreshold,
-        image: item.image || ''
-      });
-      setEditingId(item.id);
-    } else {
-      setFormData({ name: '', price: '', stockQuantity: '', alertThreshold: '', image: '' });
-      setEditingId(null);
+    try {
+      if (item) {
+        setFormData({
+          name: item.name,
+          price: item.price,
+          stockQuantity: item.stockQuantity,
+          alertThreshold: item.alertThreshold,
+          image: item.image || ''
+        });
+        setEditingId(item.id);
+      } else {
+        setFormData({ name: '', price: '', stockQuantity: '', alertThreshold: '', image: '' });
+        setEditingId(null);
+      }
+      setIsModalOpen(true);
+    } catch (e) {
+      window.alert("Error in openModal: " + e.message);
     }
-    setIsModalOpen(true);
   };
 
   const closeModal = () => setIsModalOpen(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const data = {
-      name: formData.name,
-      price: parseFloat(formData.price) || 0,
-      stockQuantity: parseInt(formData.stockQuantity) || 0,
-      alertThreshold: parseInt(formData.alertThreshold) || 0,
-      image: formData.image
-    };
+    try {
+      const data = {
+        name: formData.name,
+        price: parseFloat(formData.price) || 0,
+        stockQuantity: parseInt(formData.stockQuantity) || 0,
+        alertThreshold: parseInt(formData.alertThreshold) || 0,
+        image: formData.image
+      };
 
-    if (editingId) {
-      updateItem(editingId, data);
-    } else {
-      addItem(data);
+      if (editingId) {
+        updateItem(editingId, data);
+      } else {
+        addItem(data);
+      }
+      closeModal();
+    } catch (e) {
+      window.alert("Error in handleSubmit: " + e.message);
     }
-    closeModal();
   };
 
   return (
