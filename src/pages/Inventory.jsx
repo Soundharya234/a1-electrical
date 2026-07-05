@@ -75,35 +75,34 @@ const Inventory = () => {
           <p style={{ textAlign: 'center', padding: '2rem' }}>No items in inventory. Add some to get started.</p>
         ) : (
           items.map(item => (
-            <div key={item.id} className="glass-panel card">
-              <div className="flex-row-between">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  {item.image ? (
-                    <img src={item.image} alt={item.name} style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '8px' }} />
-                  ) : (
-                    <div style={{ width: '48px', height: '48px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', border: '1px solid var(--surface-border)' }}>
-                      <ImageIcon size={24} />
-                    </div>
-                  )}
-                  <div>
-                    <h4 style={{ margin: 0, marginBottom: '0.25rem' }}>{item.name}</h4>
-                    <p style={{ margin: 0, fontSize: '0.85rem' }}>
-                      Price: ₹{item.price.toFixed(2)} | Threshold: {item.alertThreshold}
-                    </p>
+            <div key={item.id} className="glass-panel card" style={{ width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+              {/* Top row: image + name + stock */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', width: '100%' }}>
+                {item.image ? (
+                  <img src={item.image} alt={item.name} style={{ width: '44px', height: '44px', objectFit: 'cover', borderRadius: '8px', flexShrink: 0 }} />
+                ) : (
+                  <div style={{ width: '44px', height: '44px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', border: '1px solid var(--surface-border)', flexShrink: 0 }}>
+                    <ImageIcon size={22} />
                   </div>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <h4 style={{ margin: 0, marginBottom: '0.2rem', fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</h4>
+                  <p style={{ margin: 0, fontSize: '0.82rem' }}>
+                    ₹{item.price.toFixed(2)} | Alert: {item.alertThreshold}
+                  </p>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span className={`badge ${item.stockQuantity <= item.alertThreshold ? 'badge-danger' : 'badge-success'}`}>
-                    Stock: {item.stockQuantity}
-                  </span>
-                </div>
+                <span className={`badge ${item.stockQuantity <= item.alertThreshold ? 'badge-danger' : 'badge-success'}`} style={{ flexShrink: 0, fontSize: '0.72rem' }}>
+                  {item.stockQuantity} pcs
+                </span>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--surface-border)' }}>
-                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => openModal(item)}>
-                  <Edit2 size={16} /> Edit
+
+              {/* Bottom row: Edit + Delete buttons */}
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.85rem', paddingTop: '0.85rem', borderTop: '1px solid var(--surface-border)' }}>
+                <button className="btn btn-secondary" style={{ flex: 1, padding: '0.5rem', fontSize: '0.85rem' }} onClick={() => openModal(item)}>
+                  <Edit2 size={15} /> Edit
                 </button>
-                <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => deleteItem(item.id)}>
-                  <Trash2 size={16} /> Delete
+                <button className="btn btn-danger" style={{ flex: 1, padding: '0.5rem', fontSize: '0.85rem' }} onClick={() => deleteItem(item.id)}>
+                  <Trash2 size={15} /> Delete
                 </button>
               </div>
             </div>
