@@ -44,10 +44,8 @@ body {
 
 /* Glassmorphism Classes */
 .glass-panel {
-  background: var(--surface-color);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--surface-border);
+  background: rgba(22, 33, 54, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius);
   box-shadow: var(--shadow-glass);
 }
@@ -171,9 +169,7 @@ p {
   justify-content: space-around;
   padding: 0.75rem 1rem;
   padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
-  background: rgba(15, 23, 42, 0.9);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: rgba(11, 17, 32, 0.98);
   border-top: 1px solid var(--surface-border);
   z-index: 100;
 }
