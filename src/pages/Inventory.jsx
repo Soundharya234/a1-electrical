@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../context/StoreContext';
 import { Plus, Edit2, Trash2, X, Image as ImageIcon } from 'lucide-react';
 
@@ -110,16 +111,20 @@ const Inventory = () => {
         )}
       </div>
 
-      {isModalOpen && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh',
-          backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem'
-        }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', maxHeight: '90vh', overflowY: 'auto' }}>
+      {isModalOpen && createPortal(
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+          style={{
+            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.75)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 9999, padding: '1rem', boxSizing: 'border-box'
+          }}
+        >
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem', maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box' }}>
             <div className="flex-row-between" style={{ marginBottom: '1.5rem' }}>
               <h3 style={{ margin: 0 }}>{editingId ? 'Edit Item' : 'New Item'}</h3>
-              <button className="btn-icon btn-secondary" onClick={closeModal}><X size={20} /></button>
+              <button type="button" className="btn-icon btn-secondary" onClick={closeModal}><X size={20} /></button>
             </div>
             <form onSubmit={handleSubmit}>
               <div className="input-group">
@@ -178,7 +183,8 @@ const Inventory = () => {
               </button>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
