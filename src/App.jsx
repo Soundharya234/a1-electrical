@@ -27,7 +27,7 @@ function App() {
   }
 
   return (
-    <div className="app-container">
+    <div className="app-container" style={{ overflowX: 'hidden', maxWidth: '100vw', boxSizing: 'border-box' }}>
       <div style={{ paddingBottom: '2rem' }}>
         <Routes>
           <Route path="/" element={<Dashboard onLogout={() => handleLogin(false)} />} />
