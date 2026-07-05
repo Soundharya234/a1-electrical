@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../context/StoreContext';
 import { AlertTriangle, TrendingUp, Package, LogOut, Settings, X, Sun, Calendar, BarChart2, Users } from 'lucide-react';
 
@@ -167,12 +168,20 @@ const Dashboard = ({ onLogout }) => {
       )}
 
       {/* Settings Modal */}
-      {isSettingsOpen && (
-        <div style={{
-          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem'
-        }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem' }}>
+      {isSettingsOpen && createPortal(
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setIsSettingsOpen(false); }}
+          style={{
+            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.75)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 9999, padding: '1rem', boxSizing: 'border-box'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', background: '#1e293b', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '16px', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
+          >
             <div className="flex-row-between" style={{ marginBottom: '1.5rem' }}>
               <h3 style={{ margin: 0 }}>Update Login Info</h3>
               <button className="btn-icon btn-secondary" onClick={() => setIsSettingsOpen(false)}><X size={20} /></button>
@@ -196,7 +205,8 @@ const Dashboard = ({ onLogout }) => {
               </button>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
