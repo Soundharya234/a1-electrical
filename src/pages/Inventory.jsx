@@ -121,7 +121,21 @@ const Inventory = () => {
             zIndex: 9999, padding: '1rem', boxSizing: 'border-box'
           }}
         >
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem', maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box' }}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '420px',
+              padding: '1.5rem',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxSizing: 'border-box',
+              background: '#1e293b',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '16px',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.6)'
+            }}
+          >
             <div className="flex-row-between" style={{ marginBottom: '1.5rem' }}>
               <h3 style={{ margin: 0 }}>{editingId ? 'Edit Item' : 'New Item'}</h3>
               <button type="button" className="btn-icon btn-secondary" onClick={closeModal}><X size={20} /></button>
