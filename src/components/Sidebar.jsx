@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import {
-  LayoutDashboard, TrendingUp, Package, ShieldCheck,
+  MapPin, Zap, LayoutDashboard, TrendingUp, Package, ShieldCheck,
   AlertTriangle, Heart, Truck, Factory, BarChart3, Settings,
-  ChevronLeft, ChevronRight, Zap, Box
+  ChevronLeft, ChevronRight, Box
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -11,7 +11,8 @@ export default function Sidebar() {
   const location = useLocation();
 
   const navItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', route: '/' },
+    { icon: Zap, label: 'Renewable Energy Map', route: '/' },
+    { icon: LayoutDashboard, label: 'Food Waste Dashboard', route: '/food-waste' },
     { icon: TrendingUp, label: 'Demand Forecast', route: '/forecast' },
     { icon: Package, label: 'Food Inventory', route: '/inventory' },
     { icon: Box, label: 'Packaging AI', route: '/packaging' },
@@ -21,25 +22,24 @@ export default function Sidebar() {
     { icon: Truck, label: 'Route Optimizer', route: '/logistics' },
     { icon: Factory, label: 'Processing Units', route: '/processing' },
     { icon: BarChart3, label: 'Sustainability', route: '/analytics' },
-    { icon: Zap, label: 'Renewable Energy', route: '/renewable' },
     { icon: Settings, label: 'Settings', route: '/settings' },
   ];
 
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <span className="sidebar-logo" style={{ fontSize: '24px' }}>🍃</span>
+        <span className="sidebar-logo" style={{ fontSize: '24px' }}>⚡</span>
         {!collapsed && (
           <div className="sidebar-brand">
-            <h2 style={{ margin: 0, fontSize: '18px', color: '#F8FAFC' }}>FoodSaver AI</h2>
-            <p style={{ margin: 0, fontSize: '12px', color: '#94A3B8' }}>Smart Waste Management</p>
+            <h2 style={{ margin: 0, fontSize: '16px', color: '#F8FAFC', fontWeight: 800 }}>RenewableAI India</h2>
+            <p style={{ margin: 0, fontSize: '11px', color: '#94A3B8' }}>Location Intelligence Platform</p>
           </div>
         )}
       </div>
 
       <nav className="sidebar-nav" style={{ flex: 1, padding: '10px 0' }}>
         {navItems.map((item) => {
-          const isActive = location.pathname === item.route;
+          const isActive = location.pathname === item.route || (item.route === '/' && location.pathname === '/renewable');
           const Icon = item.icon;
           return (
             <Link
@@ -55,11 +55,12 @@ export default function Sidebar() {
                 textDecoration: 'none',
                 background: isActive ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
                 borderLeft: isActive ? '3px solid #22C55E' : '3px solid transparent',
-                transition: 'all 0.2s'
+                transition: 'all 0.2s',
+                fontWeight: isActive ? 700 : 500,
               }}
             >
               <Icon className="nav-icon" size={20} style={{ minWidth: '20px' }} />
-              {!collapsed && <span className="nav-label" style={{ marginLeft: '12px', fontSize: '14px' }}>{item.label}</span>}
+              {!collapsed && <span className="nav-label" style={{ marginLeft: '12px', fontSize: '13px' }}>{item.label}</span>}
             </Link>
           );
         })}
@@ -74,7 +75,7 @@ export default function Sidebar() {
         >
           {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
         </button>
-        {!collapsed && <div className="sidebar-version" style={{ fontSize: '11px', color: '#64748B' }}>v1.0 • AI Powered</div>}
+        {!collapsed && <div className="sidebar-version" style={{ fontSize: '11px', color: '#64748B' }}>v2.0 • MNRE & CEA Data</div>}
       </div>
     </aside>
   );

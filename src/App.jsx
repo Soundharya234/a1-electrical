@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { FoodWasteProvider } from './context/FoodWasteContext';
 import Sidebar from './components/Sidebar';
+import RenewableEnergy from './pages/RenewableEnergy';
 import Dashboard from './pages/Dashboard';
 import DemandForecast from './pages/DemandForecast';
 import FoodInventory from './pages/FoodInventory';
@@ -11,7 +12,6 @@ import RedistributionNetwork from './pages/RedistributionNetwork';
 import RouteOptimizer from './pages/RouteOptimizer';
 import ProcessingUnits from './pages/ProcessingUnits';
 import SustainabilityAnalytics from './pages/SustainabilityAnalytics';
-import RenewableEnergy from './pages/RenewableEnergy';
 import PlatformSettings from './pages/PlatformSettings';
 import PackagingAdvisor from './pages/PackagingAdvisor';
 import './App.css';
@@ -25,7 +25,10 @@ function App() {
         <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
         <main className={`main-area ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            {/* Primary default route: Location-Based India Map & Renewable Energy Assessment */}
+            <Route path="/" element={<RenewableEnergy />} />
+            <Route path="/renewable" element={<RenewableEnergy />} />
+            <Route path="/food-waste" element={<Dashboard />} />
             <Route path="/forecast" element={<DemandForecast />} />
             <Route path="/inventory" element={<FoodInventory />} />
             <Route path="/packaging" element={<PackagingAdvisor />} />
@@ -35,7 +38,6 @@ function App() {
             <Route path="/logistics" element={<RouteOptimizer />} />
             <Route path="/processing" element={<ProcessingUnits />} />
             <Route path="/analytics" element={<SustainabilityAnalytics />} />
-            <Route path="/renewable" element={<RenewableEnergy />} />
             <Route path="/settings" element={<PlatformSettings />} />
           </Routes>
         </main>
