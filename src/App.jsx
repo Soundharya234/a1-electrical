@@ -1,45 +1,46 @@
 import { useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import BottomNav from './components/BottomNav';
+import { Routes, Route } from 'react-router-dom';
+import { FoodWasteProvider } from './context/FoodWasteContext';
+import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
-import Inventory from './pages/Inventory';
-import Billing from './pages/Billing';
-import History from './pages/History';
-import Customers from './pages/Customers';
-import Login from './pages/Login';
+import DemandForecast from './pages/DemandForecast';
+import FoodInventory from './pages/FoodInventory';
+import QualityMonitor from './pages/QualityMonitor';
+import SurplusManagement from './pages/SurplusManagement';
+import RedistributionNetwork from './pages/RedistributionNetwork';
+import RouteOptimizer from './pages/RouteOptimizer';
+import ProcessingUnits from './pages/ProcessingUnits';
+import SustainabilityAnalytics from './pages/SustainabilityAnalytics';
+import RenewableEnergy from './pages/RenewableEnergy';
+import PlatformSettings from './pages/PlatformSettings';
+import PackagingAdvisor from './pages/PackagingAdvisor';
+import './App.css';
 
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    return localStorage.getItem('a1_auth') === 'true';
-  });
-
-  const handleLogin = (status) => {
-    setIsLoggedIn(status);
-    if (status) {
-      localStorage.setItem('a1_auth', 'true');
-    } else {
-      localStorage.removeItem('a1_auth');
-    }
-  };
-
-  if (!isLoggedIn) {
-    return <Login onLogin={handleLogin} />;
-  }
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
-    <div className="app-container" style={{ overflowX: 'hidden', maxWidth: '100vw', boxSizing: 'border-box' }}>
-      <div style={{ paddingBottom: '2rem' }}>
-        <Routes>
-          <Route path="/" element={<Dashboard onLogout={() => handleLogin(false)} />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/billing" element={<Billing />} />
-          <Route path="/history" element={<History />} />
-          <Route path="/customers" element={<Customers />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+    <FoodWasteProvider>
+      <div className="app-layout">
+        <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+        <main className={`main-area ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/forecast" element={<DemandForecast />} />
+            <Route path="/inventory" element={<FoodInventory />} />
+            <Route path="/packaging" element={<PackagingAdvisor />} />
+            <Route path="/quality" element={<QualityMonitor />} />
+            <Route path="/surplus" element={<SurplusManagement />} />
+            <Route path="/redistribution" element={<RedistributionNetwork />} />
+            <Route path="/logistics" element={<RouteOptimizer />} />
+            <Route path="/processing" element={<ProcessingUnits />} />
+            <Route path="/analytics" element={<SustainabilityAnalytics />} />
+            <Route path="/renewable" element={<RenewableEnergy />} />
+            <Route path="/settings" element={<PlatformSettings />} />
+          </Routes>
+        </main>
       </div>
-      <BottomNav />
-    </div>
+    </FoodWasteProvider>
   );
 }
 

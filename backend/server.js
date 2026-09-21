@@ -2,236 +2,823 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const { Item, Bill, Customer, Settings } = require('./models');
+const { v4: uuidv4 } = require('uuid');
+
+const {
+  FoodItem, DemandForecast, SurplusEntry, Receiver, RedistributionOrder,
+  SensorReading, QualityAssessment, ProcessingUnit, WasteLog,
+  SustainabilityMetric, Settings
+} = require('./models');
+
+const forecastEngine = require('./forecast-engine');
+const redistributionEngine = require('./redistribution-engine');
+const sustainabilityEngine = require('./sustainability-engine');
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json());
 
-const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  console.error("FATAL ERROR: MONGODB_URI is not defined.");
-  process.exit(1);
-}
-
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('Could not connect to MongoDB', err));
-
-// --- ITEMS ---
-app.get('/api/items', async (req, res) => {
-  const items = await Item.find({});
-  res.send(items);
+// ---------------------------------------------------------
+// Food Items (/api/food-items)
+// ---------------------------------------------------------
+app.get('/api/food-items', async (req, res) => {
+  try {
+    const { category, status, search } = req.query;
+    let query = {};
+    if (category) query.category = category;
+    if (status) query.status = status;
+    if (search) query.name = { $regex: search, $options: 'i' };
+    const items = await FoodItem.find(query);
+    res.json(items);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/api/items', async (req, res) => {
-  const item = new Item(req.body);
-  await item.save();
-  res.send(item);
+app.post('/api/food-items', async (req, res) => {
+  try {
+    const item = new FoodItem({ ...req.body, id: uuidv4() });
+    await item.save();
+    res.status(201).json(item);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.put('/api/items/:id', async (req, res) => {
-  const item = await Item.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
-  res.send(item);
+app.put('/api/food-items/:id', async (req, res) => {
+  try {
+    const item = await FoodItem.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+    if (!item) return res.status(404).json({ error: 'Not found' });
+    res.json(item);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.delete('/api/items/:id', async (req, res) => {
-  await Item.findOneAndDelete({ id: req.params.id });
-  res.send({ success: true });
+app.delete('/api/food-items/:id', async (req, res) => {
+  try {
+    const item = await FoodItem.findOneAndDelete({ id: req.params.id });
+    if (!item) return res.status(404).json({ error: 'Not found' });
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// --- BILLS ---
-app.get('/api/bills', async (req, res) => {
-  const bills = await Bill.find({}).sort({ date: -1 });
-  res.send(bills);
+app.get('/api/food-items/expiring', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 3;
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + days);
+    const items = await FoodItem.find({ expiryDate: { $lte: targetDate.toISOString() } });
+    res.json(items);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/api/bills', async (req, res) => {
-  const bill = new Bill(req.body);
-  await bill.save();
-  
-  // Deduct stock for each item in the bill
-  for (let cartItem of req.body.items) {
-    const item = await Item.findOne({ id: cartItem.itemId });
-    if (item) {
-      item.stockQuantity = Math.max(0, item.stockQuantity - cartItem.quantity);
-      await item.save();
-    }
-  }
-  
-  res.send(bill);
+app.get('/api/food-items/stats', async (req, res) => {
+  try {
+    const items = await FoodItem.find();
+    let total = items.length;
+    let expiring = 0;
+    let expired = 0;
+    let lowStock = 0;
+    let totalValue = 0;
+    const byCategoryMap = {};
+
+    const now = new Date();
+    const expiryTarget = new Date();
+    expiryTarget.setDate(now.getDate() + 3);
+
+    items.forEach(item => {
+      totalValue += (item.quantity * item.unitPrice) || 0;
+      if (item.quantity < item.threshold) lowStock++;
+      
+      const itemExpiry = new Date(item.expiryDate);
+      if (itemExpiry < now) expired++;
+      else if (itemExpiry <= expiryTarget) expiring++;
+
+      if (!byCategoryMap[item.category]) {
+        byCategoryMap[item.category] = { category: item.category, count: 0, value: 0 };
+      }
+      byCategoryMap[item.category].count++;
+      byCategoryMap[item.category].value += (item.quantity * item.unitPrice) || 0;
+    });
+
+    res.json({
+      total, expiring, expired, lowStock, totalValue,
+      byCategory: Object.values(byCategoryMap)
+    });
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.delete('/api/bills/:id', async (req, res) => {
-  const bill = await Bill.findOne({ id: req.params.id });
-  const shouldRestock = req.query.restock === 'true';
+// ---------------------------------------------------------
+// Demand Forecasts (/api/forecasts)
+// ---------------------------------------------------------
+app.get('/api/forecasts', async (req, res) => {
+  try {
+    const { date, mealType } = req.query;
+    let query = {};
+    if (date) query.date = date;
+    if (mealType) query.mealType = mealType;
+    const forecasts = await DemandForecast.find(query);
+    res.json(forecasts);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
 
-  if (bill && shouldRestock) {
-    for (let cartItem of bill.items) {
-      const item = await Item.findOne({ id: cartItem.itemId });
-      if (item) {
-        item.stockQuantity += cartItem.quantity;
-        await item.save();
+app.post('/api/forecasts', async (req, res) => {
+  try {
+    const entry = new DemandForecast({ ...req.body, id: uuidv4() });
+    await entry.save();
+    res.status(201).json(entry);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.put('/api/forecasts/:id', async (req, res) => {
+  try {
+    const entry = await DemandForecast.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+    res.json(entry);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/forecasts/predict', async (req, res) => {
+  try {
+    const { date, mealType } = req.query;
+    if (!date || !mealType) return res.status(400).json({ error: 'date and mealType required' });
+    
+    const history = await DemandForecast.find({ mealType }).sort({ date: -1 }).lean();
+    const prediction = forecastEngine.generateForecast(history, date, mealType);
+    res.json(prediction);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/forecasts/accuracy', async (req, res) => {
+  try {
+    const forecasts = await DemandForecast.find().lean();
+    const accuracy = forecastEngine.calculateAccuracy(forecasts);
+    res.json(accuracy);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/forecasts/patterns', async (req, res) => {
+  try {
+    const forecasts = await DemandForecast.find().lean();
+    const patterns = forecastEngine.detectPatterns(forecasts);
+    res.json(patterns);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/forecasts/weekly-plan', async (req, res) => {
+  try {
+    const forecasts = await DemandForecast.find().lean();
+    const plan = forecastEngine.generateWeeklyPlan(forecasts);
+    res.json(plan);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ---------------------------------------------------------
+// Surplus (/api/surplus)
+// ---------------------------------------------------------
+app.get('/api/surplus', async (req, res) => {
+  try {
+    const { status } = req.query;
+    let query = {};
+    if (status) query.status = status;
+    const items = await SurplusEntry.find(query);
+    res.json(items);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/surplus', async (req, res) => {
+  try {
+    const entry = new SurplusEntry({ ...req.body, id: uuidv4() });
+    await entry.save();
+    res.status(201).json(entry);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.put('/api/surplus/:id', async (req, res) => {
+  try {
+    const entry = await SurplusEntry.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+    res.json(entry);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/surplus/match/:id', async (req, res) => {
+  try {
+    const surplus = await SurplusEntry.findOne({ id: req.params.id }).lean();
+    if (!surplus) return res.status(404).json({ error: 'Not found' });
+    const receivers = await Receiver.find({ active: true }).lean();
+    
+    const matches = redistributionEngine.matchSurplusToReceivers(surplus, receivers);
+    res.json(matches);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/surplus/stats', async (req, res) => {
+  try {
+    const surplusItems = await SurplusEntry.find();
+    let total = surplusItems.length;
+    let available = 0;
+    let claimed = 0;
+    let delivered = 0;
+    let totalValue = 0;
+    let carbonFootprint = 0;
+
+    surplusItems.forEach(item => {
+      if (item.status === 'available') available++;
+      if (item.status === 'claimed') claimed++;
+      if (item.status === 'delivered') delivered++;
+      totalValue += item.estimatedValue || 0;
+      carbonFootprint += item.carbonFootprint || 0;
+    });
+
+    res.json({ total, available, claimed, delivered, totalValue, carbonFootprint });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/surplus/detect', async (req, res) => {
+  try {
+    const forecasts = await DemandForecast.find();
+    let detected = 0;
+    for (const f of forecasts) {
+      if (f.actualServings != null && f.actualServings < f.predictedServings * 0.8) {
+        const excess = f.predictedServings - f.actualServings;
+        // Check if surplus already generated for this forecast
+        const existing = await SurplusEntry.findOne({ sourceForecastId: f.id });
+        if (!existing) {
+          const entry = new SurplusEntry({
+            id: uuidv4(),
+            name: `Surplus from ${f.mealType}`,
+            quantity: excess,
+            unit: 'servings',
+            status: 'available',
+            sourceForecastId: f.id,
+            dateIdentified: new Date().toISOString(),
+            estimatedValue: excess * 50 // approx INR 50 per serving
+          });
+          await entry.save();
+          detected++;
+        }
       }
     }
-  }
-
-  await Bill.findOneAndDelete({ id: req.params.id });
-  res.send({ success: true });
+    res.json({ success: true, detected });
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/api/bills/:id/return', async (req, res) => {
-  const billId = req.params.id;
-  const returnedItemsMap = req.body; // { itemId: quantityToReturn }
-  
-  const bill = await Bill.findOne({ id: billId });
-  if (!bill) return res.status(404).send("Bill not found");
+// ---------------------------------------------------------
+// Receivers (/api/receivers)
+// ---------------------------------------------------------
+app.get('/api/receivers', async (req, res) => {
+  try {
+    const { type, city, active } = req.query;
+    let query = {};
+    if (type) query.type = type;
+    if (city) query.city = city;
+    if (active !== undefined) query.active = active === 'true';
+    const items = await Receiver.find(query);
+    res.json(items);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
 
-  const updatedItems = [];
-  let newTotal = 0;
+app.post('/api/receivers', async (req, res) => {
+  try {
+    const entry = new Receiver({ ...req.body, id: uuidv4() });
+    await entry.save();
+    res.status(201).json(entry);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
 
-  for (let cartItem of bill.items) {
-    const returnQty = returnedItemsMap[cartItem.itemId] || 0;
-    const remainingQty = cartItem.quantity - returnQty;
+app.put('/api/receivers/:id', async (req, res) => {
+  try {
+    const entry = await Receiver.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+    res.json(entry);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
 
-    if (returnQty > 0) {
-      const invItem = await Item.findOne({ id: cartItem.itemId });
-      if (invItem) {
-        invItem.stockQuantity += returnQty;
-        await invItem.save();
+app.delete('/api/receivers/:id', async (req, res) => {
+  try {
+    const entry = await Receiver.findOneAndDelete({ id: req.params.id });
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/receivers/stats', async (req, res) => {
+  try {
+    const receivers = await Receiver.find();
+    let total = receivers.length;
+    let totalCapacity = 0;
+    let totalReceived = 0;
+    const byTypeMap = {};
+
+    receivers.forEach(r => {
+      totalCapacity += r.capacity || 0;
+      totalReceived += r.totalReceived || 0;
+      byTypeMap[r.type] = (byTypeMap[r.type] || 0) + 1;
+    });
+
+    res.json({ total, byType: byTypeMap, totalCapacity, totalReceived });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ---------------------------------------------------------
+// Redistribution Orders (/api/redistribution)
+// ---------------------------------------------------------
+app.get('/api/redistribution', async (req, res) => {
+  try {
+    const orders = await RedistributionOrder.find().sort({ createdAt: -1 });
+    res.json(orders);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/redistribution', async (req, res) => {
+  try {
+    const order = new RedistributionOrder({ ...req.body, id: uuidv4() });
+    await order.save();
+
+    // Link surplus items
+    if (order.surplusItemIds && order.surplusItemIds.length > 0) {
+      await SurplusEntry.updateMany(
+        { id: { $in: order.surplusItemIds } },
+        { $set: { status: 'claimed' } }
+      );
+    }
+    res.status(201).json(order);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.put('/api/redistribution/:id', async (req, res) => {
+  try {
+    const order = await RedistributionOrder.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+    if (!order) return res.status(404).json({ error: 'Not found' });
+
+    if (req.body.status === 'delivered') {
+      if (order.surplusItemIds && order.surplusItemIds.length > 0) {
+        await SurplusEntry.updateMany(
+          { id: { $in: order.surplusItemIds } },
+          { $set: { status: 'delivered' } }
+        );
+      }
+      if (order.receiverId) {
+        await Receiver.findOneAndUpdate(
+          { id: order.receiverId },
+          { $inc: { totalReceived: order.totalQuantity || 0 } }
+        );
       }
     }
+    res.json(order);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
 
-    if (remainingQty > 0) {
-      updatedItems.push({ ...cartItem._doc, quantity: remainingQty });
-      newTotal += remainingQty * cartItem.price;
+app.get('/api/redistribution/optimize-route', async (req, res) => {
+  try {
+    const { origin_lat, origin_lng, destination_ids } = req.query;
+    if (!origin_lat || !origin_lng || !destination_ids) {
+      return res.status(400).json({ error: 'Missing required parameters' });
     }
-  }
-
-  if (updatedItems.length === 0) {
-    await Bill.findOneAndDelete({ id: billId });
-    res.send({ deleted: true });
-  } else {
-    bill.items = updatedItems;
-    bill.total = newTotal;
-    await bill.save();
-    res.send(bill);
-  }
+    const destIdsArray = destination_ids.split(',');
+    const receivers = await Receiver.find({ id: { $in: destIdsArray } }).lean();
+    
+    const origin = { lat: parseFloat(origin_lat), lng: parseFloat(origin_lng) };
+    const route = redistributionEngine.optimizeRoute(origin, receivers);
+    res.json(route);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// --- CUSTOMERS ---
-app.get('/api/customers', async (req, res) => {
-  const customers = await Customer.find({});
-  res.send(customers);
+app.get('/api/redistribution/stats', async (req, res) => {
+  try {
+    const orders = await RedistributionOrder.find();
+    let total = orders.length;
+    let pending = 0;
+    let inTransit = 0;
+    let delivered = 0;
+    let totalQuantity = 0;
+    let totalCarbonSaved = 0;
+
+    orders.forEach(o => {
+      if (o.status === 'pending') pending++;
+      if (o.status === 'in_transit') inTransit++;
+      if (o.status === 'delivered') delivered++;
+      totalQuantity += o.totalQuantity || 0;
+      totalCarbonSaved += o.carbonSaved || 0;
+    });
+
+    res.json({ total, pending, inTransit, delivered, totalQuantity, totalCarbonSaved });
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/api/customers', async (req, res) => {
-  const customer = new Customer(req.body);
-  await customer.save();
-  res.send(customer);
+// ---------------------------------------------------------
+// Sensors (/api/sensors)
+// ---------------------------------------------------------
+app.get('/api/sensors', async (req, res) => {
+  try {
+    const { type, location } = req.query;
+    let query = {};
+    if (type) query.type = type;
+    if (location) query.location = location;
+    const readings = await SensorReading.find(query).sort({ timestamp: -1 }).limit(100);
+    res.json(readings);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.put('/api/customers/:id', async (req, res) => {
-  const customer = await Customer.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
-  res.send(customer);
+app.post('/api/sensors', async (req, res) => {
+  try {
+    const reading = new SensorReading({ ...req.body, id: uuidv4() });
+    await reading.save();
+    res.status(201).json(reading);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.delete('/api/customers/:id', async (req, res) => {
-  await Customer.findOneAndDelete({ id: req.params.id });
-  res.send({ success: true });
+app.get('/api/sensors/alerts', async (req, res) => {
+  try {
+    const yesterday = new Date();
+    yesterday.setHours(yesterday.getHours() - 24);
+    const alerts = await SensorReading.find({ 
+      isAlert: true,
+      timestamp: { $gte: yesterday.toISOString() }
+    }).sort({ timestamp: -1 });
+    res.json(alerts);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// --- SETTINGS ---
+app.get('/api/sensors/dashboard', async (req, res) => {
+  try {
+    // Latest reading per device grouped by location
+    const latestReadings = await SensorReading.aggregate([
+      { $sort: { timestamp: -1 } },
+      { $group: { _id: "$location", readings: { $push: "$$ROOT" } } },
+      { $project: {
+          location: "$_id",
+          latest: { $slice: ["$readings", 5] } // top 5 recent per location
+      }}
+    ]);
+    res.json(latestReadings);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/sensors/simulate', async (req, res) => {
+  try {
+    const locations = ['Cold Storage A', 'Cold Storage B', 'Dry Storage', 'Kitchen Main', 'Kitchen Prep', 'Serving Area'];
+    let generated = 0;
+    
+    for (const loc of locations) {
+      for (let i = 0; i < 12; i++) { // 12 readings (1 hour, every 5 mins)
+        const t = new Date();
+        t.setMinutes(t.getMinutes() - (i * 5));
+        
+        let tempRange, humRange;
+        if (loc.includes('Cold')) { tempRange = [2, 8]; humRange = [70, 85]; }
+        else if (loc.includes('Dry')) { tempRange = [20, 28]; humRange = [40, 60]; }
+        else if (loc.includes('Kitchen')) { tempRange = [22, 35]; humRange = [50, 75]; }
+        else { tempRange = [20, 30]; humRange = [45, 65]; }
+
+        let temp = tempRange[0] + Math.random() * (tempRange[1] - tempRange[0]);
+        let hum = humRange[0] + Math.random() * (humRange[1] - humRange[0]);
+        
+        let isAlert = false;
+        let alertMessage = null;
+
+        if (Math.random() < 0.1) {
+          temp += 10;
+          hum -= 20;
+          isAlert = true;
+          alertMessage = "Anomaly detected!";
+        }
+
+        const reading = new SensorReading({
+          id: uuidv4(),
+          deviceId: `DEV-${loc.replace(/\s+/g, '')}`,
+          location: loc,
+          type: 'environment',
+          value: temp,
+          unit: 'C',
+          temperature: temp,
+          humidity: hum,
+          timestamp: t.toISOString(),
+          isAlert,
+          alertMessage
+        });
+        await reading.save();
+        generated++;
+      }
+    }
+    res.json({ success: true, message: `Generated ${generated} readings` });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ---------------------------------------------------------
+// Quality (/api/quality)
+// ---------------------------------------------------------
+app.get('/api/quality', async (req, res) => {
+  try {
+    const { foodItemId, freshness } = req.query;
+    let query = {};
+    if (foodItemId) query.foodItemId = foodItemId;
+    if (freshness) query.freshness = freshness;
+    const items = await QualityAssessment.find(query).sort({ assessmentDate: -1 });
+    res.json(items);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/quality', async (req, res) => {
+  try {
+    const entry = new QualityAssessment({ ...req.body, id: uuidv4() });
+    await entry.save();
+    res.status(201).json(entry);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/quality/assess/:foodItemId', async (req, res) => {
+  try {
+    const item = await FoodItem.findOne({ id: req.params.foodItemId });
+    if (!item) return res.status(404).json({ error: 'Food item not found' });
+    
+    // Auto-assess quality
+    const expiry = new Date(item.expiryDate);
+    const now = new Date();
+    const daysUntilExpiry = Math.max(0, (expiry - now) / (1000 * 60 * 60 * 24));
+    
+    let score = 10;
+    if (daysUntilExpiry < 1) score = 2;
+    else if (daysUntilExpiry < 3) score = 5;
+    else if (daysUntilExpiry < 7) score = 8;
+    
+    let freshness = 'good';
+    if (score < 4) freshness = 'spoiled';
+    else if (score < 7) freshness = 'fair';
+    
+    let recommendation = 'Safe to use';
+    if (freshness === 'spoiled') recommendation = 'Dispose immediately';
+    else if (freshness === 'fair') recommendation = 'Use within 24 hours';
+    
+    res.json({ score, freshness, recommendation });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/quality/history/:foodItemId', async (req, res) => {
+  try {
+    const history = await QualityAssessment.find({ foodItemId: req.params.foodItemId }).sort({ assessmentDate: 1 });
+    res.json(history);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ---------------------------------------------------------
+// Processing Units (/api/processing)
+// ---------------------------------------------------------
+app.get('/api/processing', async (req, res) => {
+  try {
+    const units = await ProcessingUnit.find();
+    res.json(units);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/processing', async (req, res) => {
+  try {
+    const unit = new ProcessingUnit({ ...req.body, id: uuidv4() });
+    await unit.save();
+    res.status(201).json(unit);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.put('/api/processing/:id', async (req, res) => {
+  try {
+    const unit = await ProcessingUnit.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+    if (!unit) return res.status(404).json({ error: 'Not found' });
+    res.json(unit);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/processing/efficiency', async (req, res) => {
+  try {
+    const units = await ProcessingUnit.find();
+    let avgEfficiency = 0, avgUptime = 0, totalEnergy = 0, totalWastage = 0;
+    
+    if (units.length > 0) {
+      avgEfficiency = units.reduce((acc, u) => acc + (u.oee || 0), 0) / units.length;
+      avgUptime = units.reduce((acc, u) => acc + (u.availability || 0), 0) / units.length;
+      totalEnergy = units.reduce((acc, u) => acc + (u.energyConsumed || 0), 0);
+      totalWastage = units.reduce((acc, u) => acc + (u.wastageGenerated || 0), 0);
+    }
+
+    res.json({ avgEfficiency, avgUptime, totalEnergy, totalWastage, units });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/processing/anomalies', async (req, res) => {
+  try {
+    const units = await ProcessingUnit.find();
+    const anomalies = units.filter(u => (u.oee < 70 || u.wastageGenerated > 15 || u.availability < 80)).map(u => {
+      return {
+        unit: u.name,
+        issue: u.oee < 70 ? 'Low Efficiency' : (u.wastageGenerated > 15 ? 'High Wastage' : 'Low Uptime'),
+        recommendation: 'Inspect unit immediately and check maintenance logs.'
+      };
+    });
+    res.json(anomalies);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ---------------------------------------------------------
+// Waste Logs (/api/waste)
+// ---------------------------------------------------------
+app.get('/api/waste', async (req, res) => {
+  try {
+    const { source, reason, from, to } = req.query;
+    let query = {};
+    if (source) query.source = source;
+    if (reason) query.reason = reason;
+    if (from || to) {
+      query.date = {};
+      if (from) query.date.$gte = from;
+      if (to) query.date.$lte = to;
+    }
+    const logs = await WasteLog.find(query);
+    res.json(logs);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/waste', async (req, res) => {
+  try {
+    // Mock calculate carbon & water using engine
+    const carbonFootprint = sustainabilityEngine.calculateCarbonImpact(req.body.quantity, 'landfill');
+    const entry = new WasteLog({ 
+      ...req.body, 
+      id: uuidv4(),
+      carbonFootprint: carbonFootprint,
+      waterFootprint: (req.body.quantity * 10) // Mock water
+    });
+    await entry.save();
+    res.status(201).json(entry);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/waste/stats', async (req, res) => {
+  try {
+    const logs = await WasteLog.find();
+    let totalWaste = 0;
+    let totalCost = 0;
+    let totalCarbon = 0;
+    let totalWater = 0;
+    const bySource = {};
+    const byReason = {};
+
+    logs.forEach(l => {
+      totalWaste += l.quantity || 0;
+      totalCost += l.cost || 0;
+      totalCarbon += l.carbonFootprint || 0;
+      totalWater += l.waterFootprint || 0;
+
+      if (!bySource[l.source]) bySource[l.source] = 0;
+      bySource[l.source] += l.quantity || 0;
+
+      if (!byReason[l.reason]) byReason[l.reason] = 0;
+      byReason[l.reason] += l.quantity || 0;
+    });
+
+    res.json({ totalWaste, totalCost, totalCarbon, totalWater, bySource, byReason, preventablePercentage: 45 });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ---------------------------------------------------------
+// Sustainability (/api/sustainability)
+// ---------------------------------------------------------
+app.get('/api/sustainability', async (req, res) => {
+  try {
+    const metrics = await SustainabilityMetric.find().sort({ period: -1 });
+    res.json(metrics);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/sustainability/dashboard', async (req, res) => {
+  try {
+    const metrics = await SustainabilityMetric.find().sort({ period: -1 }).limit(1);
+    if (metrics.length > 0) {
+      res.json(metrics[0]);
+    } else {
+      res.json({ totalCarbonSaved: 0, waterSaved: 0, mealsRedistributed: 0, esgScore: 0, wasteDiversionRate: 0 });
+    }
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/sustainability/report', async (req, res) => {
+  try {
+    const data = await SustainabilityMetric.find().lean();
+    const report = sustainabilityEngine.generateSustainabilityReport(data);
+    res.json(report);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/sustainability/trends', async (req, res) => {
+  try {
+    const trends = await SustainabilityMetric.find().sort({ period: -1 }).limit(6);
+    res.json(trends);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ---------------------------------------------------------
+// Settings (/api/settings)
+// ---------------------------------------------------------
 app.get('/api/settings', async (req, res) => {
-  let settings = await Settings.findOne({ key: 'auth' });
-  if (!settings) {
-    settings = new Settings({ key: 'auth', username: 'thiru', password: 'admin' });
-    await settings.save();
-  }
-  res.send({ username: settings.username, password: settings.password });
+  try {
+    let settings = await Settings.findOne();
+    if (!settings) {
+      settings = new Settings({ id: uuidv4() });
+      await settings.save();
+    }
+    res.json(settings);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 app.put('/api/settings', async (req, res) => {
-  const settings = await Settings.findOneAndUpdate(
-    { key: 'auth' }, 
-    { username: req.body.username, password: req.body.password },
-    { new: true, upsert: true }
-  );
-  res.send({ username: settings.username, password: settings.password });
+  try {
+    let settings = await Settings.findOne();
+    if (!settings) {
+      settings = new Settings({ ...req.body, id: uuidv4() });
+      await settings.save();
+      return res.json(settings);
+    }
+    Object.assign(settings, req.body);
+    await settings.save();
+    res.json(settings);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// Setup Data - Seeds 200 items
+// ---------------------------------------------------------
+// Setup / Seed (/api/setup)
+// ---------------------------------------------------------
 app.get('/api/setup', async (req, res) => {
   try {
-    await Item.deleteMany({});
-    
-    const { v4: uuidv4 } = require('uuid');
-    const categories = [
-      { prefix: 'Finolex Wire', prices: [800, 1200, 1600, 2500, 3200], suffixes: ['1.0 sq mm', '1.5 sq mm', '2.5 sq mm', '4.0 sq mm', '6.0 sq mm'] },
-      { prefix: 'Polycab Wire', prices: [750, 1100, 1500, 2400, 3000], suffixes: ['1.0 sq mm', '1.5 sq mm', '2.5 sq mm', '4.0 sq mm', '6.0 sq mm'] },
-      { prefix: 'Anchor Roma Switch', prices: [45, 65, 85, 120, 200], suffixes: ['6A 1-way', '6A 2-way', '16A 1-way', '16A 2-way', '32A DP'] },
-      { prefix: 'Havells Switch', prices: [50, 70, 90, 130, 210], suffixes: ['6A', '16A', 'Bell Push', 'Indicator', 'Blank Plate'] },
-      { prefix: 'Anchor Socket', prices: [65, 85, 120, 150, 250], suffixes: ['6A 2-pin', '6A 3-pin', '16A 3-pin', '6A/16A Combi', 'Universal'] },
-      { prefix: 'Legrand MCB', prices: [150, 200, 450, 600, 1200], suffixes: ['10A SP', '16A SP', '32A DP', '40A DP', '63A FP'] },
-      { prefix: 'Havells MCB', prices: [140, 190, 400, 550, 1100], suffixes: ['10A SP', '16A SP', '32A DP', '40A DP', '63A FP'] },
-      { prefix: 'Philips LED Bulb', prices: [90, 120, 250, 400, 800], suffixes: ['7W', '9W', '12W', '20W', '40W'] },
-      { prefix: 'Crompton Ceiling Fan', prices: [1200, 1500, 1850, 2200, 3500], suffixes: ['600mm', '900mm', '1200mm', '1400mm', 'Decorative'] },
-      { prefix: 'Usha Table Fan', prices: [1500, 1800, 2200, 2500, 3000], suffixes: ['Small', 'Medium', 'Large', 'High Speed', 'Pedestal'] },
-      { prefix: 'PVC Conduit Pipe', prices: [45, 65, 90, 120, 200], suffixes: ['20mm', '25mm', '32mm', '40mm', '50mm'] },
-      { prefix: 'Casing Capping', prices: [30, 50, 80, 100, 150], suffixes: ['1/2 inch', '3/4 inch', '1 inch', '1.5 inch', '2 inch'] },
-      { prefix: 'Anchor Insulation Tape', prices: [10, 15, 20, 30, 50], suffixes: ['Red', 'Yellow', 'Blue', 'Black', 'Green'] },
-      { prefix: 'V-Guard Stabilizer', prices: [1200, 1800, 2500, 3500, 5000], suffixes: ['AC 1 Ton', 'AC 1.5 Ton', 'Fridge', 'TV', 'Mainline'] },
-      { prefix: 'Bajaj Water Heater', prices: [2500, 3500, 4500, 6000, 8000], suffixes: ['3L Instant', '10L Storage', '15L Storage', '25L Storage', 'Immersion Rod'] },
-      { prefix: 'GM Modular Plate', prices: [50, 80, 120, 180, 300], suffixes: ['1 Module', '2 Module', '4 Module', '6 Module', '8 Module'] },
-      { prefix: 'Distribution Board', prices: [400, 600, 900, 1500, 2500], suffixes: ['4 Way', '6 Way', '8 Way', '12 Way', '16 Way'] },
-      { prefix: 'Exhaust Fan', prices: [600, 900, 1200, 1800, 2500], suffixes: ['4 inch', '6 inch', '8 inch', '10 inch', '12 inch'] },
-      { prefix: 'LED Tube Light', prices: [200, 350, 500, 800, 1200], suffixes: ['10W', '20W', 'T5 Batten', 'T8 Tube', 'Color'] },
-      { prefix: 'Extension Box', prices: [150, 250, 400, 600, 1000], suffixes: ['2 Socket', '3 Socket', '4 Socket', 'Spike Guard', 'Heavy Duty'] }
-    ];
+    await Promise.all([
+      FoodItem.deleteMany({}), DemandForecast.deleteMany({}), SurplusEntry.deleteMany({}),
+      Receiver.deleteMany({}), RedistributionOrder.deleteMany({}), SensorReading.deleteMany({}),
+      QualityAssessment.deleteMany({}), ProcessingUnit.deleteMany({}), WasteLog.deleteMany({}),
+      SustainabilityMetric.deleteMany({}), Settings.deleteMany({})
+    ]);
 
-    const items = [];
-    categories.forEach(cat => {
-      cat.suffixes.forEach((suffix, index) => {
-        items.push({
-          id: uuidv4(),
-          name: `${cat.prefix} ${suffix}`,
-          price: cat.prices[index],
-          stockQuantity: Math.floor(Math.random() * 50) + 10,
-          alertThreshold: Math.floor(Math.random() * 5) + 5,
-          image: ''
-        });
-      });
-    });
-
-    const randomPrefixes = ['Cona', 'Hi-Fi', 'Simon', 'L&T', 'Schneider', 'Syska', 'Wipro'];
-    const randomProducts = ['Switch', 'Socket', 'MCB', 'RCCB', 'LED Bulb', 'Wire Coil', 'Regulator'];
-    const randomSpecs = ['Standard', 'Premium', 'Gold', 'Silver', 'Heavy Duty'];
-    
-    for (let i = 0; i < 100; i++) {
-      const pref = randomPrefixes[Math.floor(Math.random() * randomPrefixes.length)];
-      const prod = randomProducts[Math.floor(Math.random() * randomProducts.length)];
-      const spec = randomSpecs[Math.floor(Math.random() * randomSpecs.length)];
-      
-      items.push({
+    // Create Food Items
+    const foodItems = [];
+    const categories = ['Produce', 'Dairy', 'Meat', 'Grains', 'Prepared'];
+    for(let i=0; i<50; i++) {
+      const expDate = new Date();
+      expDate.setDate(expDate.getDate() + (Math.floor(Math.random() * 17) - 2)); // -2 to +15 days
+      foodItems.push(new FoodItem({
         id: uuidv4(),
-        name: `${pref} ${prod} ${spec}`,
-        price: Math.floor(Math.random() * 2000) + 50,
-        stockQuantity: Math.floor(Math.random() * 100) + 5,
-        alertThreshold: Math.floor(Math.random() * 10) + 2,
-        image: ''
-      });
+        name: `Demo Food ${i+1}`,
+        category: categories[i % categories.length],
+        quantity: Math.floor(Math.random() * 100) + 10,
+        unit: 'kg',
+        expiryDate: expDate.toISOString(),
+        location: 'Storage A',
+        status: expDate < new Date() ? 'expired' : 'in_stock',
+        threshold: 20,
+        unitPrice: Math.floor(Math.random() * 100) + 10
+      }));
     }
+    await FoodItem.insertMany(foodItems);
 
-    await Item.insertMany(items);
-    res.send({ success: true, message: `Successfully seeded ${items.length} items to database!` });
-  } catch (error) {
-    res.status(500).send({ success: false, error: error.message });
-  }
+    // Demand Forecasts
+    const forecasts = [];
+    const meals = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
+    for(let i=0; i<120; i++) { // 30 days * 4 meals
+      const d = new Date();
+      d.setDate(d.getDate() - Math.floor(i/4));
+      const predicted = Math.floor(Math.random() * 500) + 100;
+      const actual = predicted - Math.floor(Math.random() * 100);
+      forecasts.push(new DemandForecast({
+        id: uuidv4(),
+        date: d.toISOString().split('T')[0],
+        mealType: meals[i % 4],
+        predictedServings: predicted,
+        actualServings: actual,
+        weather: 'Sunny',
+        events: []
+      }));
+    }
+    await DemandForecast.insertMany(forecasts);
+
+    // Receivers
+    const receivers = [];
+    for(let i=0; i<15; i++) {
+      receivers.push(new Receiver({
+        id: uuidv4(),
+        name: `NGO / Shelter ${i+1}`,
+        type: ['ngo', 'food_bank', 'shelter'][i % 3],
+        city: 'Mumbai',
+        address: 'Demo Address',
+        contactPerson: 'John Doe',
+        contactPhone: '1234567890',
+        capacity: 100 + (i * 10),
+        active: true,
+        location: { lat: 19.0760 + (i * 0.01), lng: 72.8777 + (i * 0.01) },
+        totalReceived: Math.floor(Math.random() * 1000)
+      }));
+    }
+    await Receiver.insertMany(receivers);
+
+    res.json({ success: true, message: 'Seeded comprehensive demo data successfully.' });
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.listen(PORT, () => {
-  console.log(`Backend server running on port ${PORT}`);
+const PORT = process.env.PORT || 5000;
+
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-order').then(() => {
+  console.log('Connected to MongoDB');
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}).catch(err => {
+  console.error('MongoDB connection error:', err);
 });

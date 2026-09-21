@@ -1,0 +1,6 @@
+{
+  "name": "km-dreamhouse",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
